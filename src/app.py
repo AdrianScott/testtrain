@@ -3,6 +3,12 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from config import LABELS
 import os
+import time
+from prometheus_client import Counter, Histogram, generate_latest
+
+# Prometheus Metrics
+REQS = Counter("tox_api_requests_total", "Total number of /predict calls")
+LATENCY = Histogram("tox_api_latency_seconds", "Latency of /predict calls")
 
 app = Flask(__name__)
 
@@ -32,6 +38,7 @@ def home():
 
 @app.route('/predict', methods=['POST'])
 def predict():
+    start_time = time.time()
     try:
         data = request.get_json()
         text = data.get('text')
@@ -44,10 +51,17 @@ def predict():
             scores = torch.sigmoid(outputs.logits)[0].cpu().tolist()
         
         predictions = dict(zip(LABELS, scores))
+        # Record latency and increment request counter
+        LATENCY.observe(time.time() - start_time)
+        REQS.inc()
         return jsonify(predictions)
     except Exception as e:
         app.logger.error(f"Error during prediction: {e}")
         return jsonify({'error': 'Error processing request', 'details': str(e)}), 500
+
+@app.route('/metrics')
+def metrics():
+    return generate_latest(), 200, {'Content-Type': 'text/plain; version=0.0.4'}
 
 if __name__ == '__main__':
     # Make sure to create a 'templates' folder in the same directory as app.py
