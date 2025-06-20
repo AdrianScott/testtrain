@@ -1,0 +1,8 @@
+torch>=2.2.0
+transformers>=4.40.0
+datasets>=2.19.0
+evaluate>=0.4.1
+sentencepiece
+accelerate>=0.26.0
+scikit-learn
+Flask>=2.0.0
