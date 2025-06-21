@@ -21,4 +21,5 @@ EXPOSE 5000
 ENV MODEL_DIR=./model
 
 # Command to run the application
-CMD ["python", "-u", "src/app.py"]
+# Command to run the application using Gunicorn
+CMD ["gunicorn", "--workers", "4", "--bind", "0.0.0.0:5000", "src.app:app"]

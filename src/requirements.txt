@@ -1,6 +1,8 @@
 torch>=2.2.0
 transformers>=4.40.0
 datasets>=2.19.0
+fsspec<=2024.9.0
+gunicorn>=20.1.0
 evaluate>=0.4.1
 sentencepiece
 accelerate>=0.26.0
