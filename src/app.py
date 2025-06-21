@@ -1,7 +1,8 @@
 from flask import Flask, request, jsonify, render_template
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from config import LABELS
+# Define the labels directly in the app
+LABELS = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
 import os
 import time
 from prometheus_client import Counter, Histogram, generate_latest
