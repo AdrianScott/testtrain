@@ -161,6 +161,104 @@ To run the training process yourself:
     ```
     This will start the fine-tuning process. Once complete, the trained model and tokenizer files will be saved to the `model/` directory, ready to be served by the Flask application.
 
+## Production Deployment with Nginx Reverse Proxy
+
+When running this stack on a production server, it's best practice to use a reverse proxy like Nginx to manage incoming traffic. This allows you to run multiple web services on a single server, handle SSL termination (HTTPS), and serve everything from the standard web ports (80/443).
+
+The following configuration will set up Nginx to:
+- Serve the **Toxicity App** on the main domain (`/`).
+- Serve **Prometheus** on the `/prometheus/` subpath.
+- Serve **Grafana** on the `/grafana/` subpath.
+
+### 1. Update Docker Compose for Grafana
+
+For Grafana to work correctly when served from a subpath (e.g., `/grafana/`), you must update its configuration in the `docker-compose.yml` file. You need to set environment variables to inform Grafana of its public URL.
+
+Also, the default port inside the Grafana container is `3000`. Your `docker-compose.yml` should map your desired host port (e.g., `3100`) to the container's port `3000`.
+
+Make sure the `grafana` service in your `docker-compose.yml` looks like this (remember to replace `your_domain.com`):
+
+```yaml
+  grafana:
+    image: grafana/grafana:9.5.3
+    ports:
+      - "3100:3000" # Expose on host port 3100, maps to container port 3000
+    volumes:
+      - ./monitoring/grafana:/var/lib/grafana
+    environment:
+      - GF_SERVER_ROOT_URL=http://your_domain.com/grafana
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+```
+
+### 2. Create the Nginx Configuration File
+
+Create a new file in `/etc/nginx/sites-available/`, for example, `toxicity-app.conf`. **Remember to replace `your_domain.com` with your actual domain name.**
+
+```bash
+sudo nano /etc/nginx/sites-available/toxicity-app.conf
+```
+
+Paste the following configuration into the file:
+
+```nginx
+server {
+    listen 80;
+    server_name your_domain.com;
+
+    # Proxy for the main Flask App
+    location / {
+        proxy_pass http://localhost:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Proxy for Prometheus
+    # Note the trailing slash on both location and proxy_pass
+    location /prometheus/ {
+        proxy_pass http://localhost:9090/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Proxy for Grafana
+    # Note the trailing slash on both location and proxy_pass
+    location /grafana/ {
+        # Proxy to the HOST port you exposed in docker-compose.yml
+        proxy_pass http://localhost:3100/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+### 3. Enable the Site and Test Configuration
+
+Create a symbolic link from `sites-available` to `sites-enabled` to activate the configuration:
+
+```bash
+sudo ln -s /etc/nginx/sites-available/toxicity-app.conf /etc/nginx/sites-enabled/
+```
+
+Test your Nginx configuration for syntax errors:
+
+```bash
+sudo nginx -t
+```
+
+If the test is successful, reload Nginx to apply the changes:
+
+```bash
+sudo systemctl reload nginx
+```
+
+You should now be able to access your services at `http://your_domain.com`, `http://your_domain.com/prometheus/`, and `http://your_domain.com/grafana/`.
+
 ## Model Information
 
 The application is designed to load a pre-trained sequence classification model compatible with Hugging Face `transformers` (e.g., a fine-tuned BERT, RoBERTa, DistilBERT, etc.). The `app.py` script uses `AutoTokenizer.from_pretrained()` and `AutoModelForSequenceClassification.from_pretrained()`.
