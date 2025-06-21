@@ -6,6 +6,15 @@ LABELS = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate
 import os
 import time
 from prometheus_client import Counter, Histogram, generate_latest
+import logging
+import json
+
+# Set up a logger for query logging
+query_logger = logging.getLogger('query_logger')
+query_logger.setLevel(logging.INFO)
+# Use a file handler to log to a file. Each log entry will be a new line.
+handler = logging.FileHandler('queries.jsonl')
+query_logger.addHandler(handler)
 
 # Prometheus Metrics
 REQS = Counter("tox_api_requests_total", "Total number of /predict calls")
@@ -52,12 +61,64 @@ def predict():
             scores = torch.sigmoid(outputs.logits)[0].cpu().tolist()
         
         predictions = dict(zip(LABELS, scores))
+
+        # Log request details as JSON
+        log_entry = {
+            'timestamp': time.time(),
+            'ip_address': request.remote_addr,
+            'query': text,
+            'prediction': predictions
+        }
+        query_logger.info(json.dumps(log_entry))
+
         # Record latency and increment request counter
         LATENCY.observe(time.time() - start_time)
         REQS.inc()
         return jsonify(predictions)
     except Exception as e:
         app.logger.error(f"Error during prediction: {e}")
+        return jsonify({'error': 'Error processing request', 'details': str(e)}), 500
+
+@app.route('/predict_batch', methods=['POST'])
+def predict_batch():
+    start_time = time.time()
+    try:
+        data = request.get_json()
+        text1 = data.get('text1')
+        text2 = data.get('text2')
+
+        if not text1 or not text2:
+            return jsonify({'error': 'Two text fields are required'}), 400
+
+        with torch.no_grad():
+            inputs1 = tokenizer(text1, return_tensors="pt", truncation=True, max_length=512).to(device)
+            outputs1 = model(**inputs1)
+            scores1 = torch.sigmoid(outputs1.logits)[0].cpu().tolist()
+            prediction1 = dict(zip(LABELS, scores1))
+
+            inputs2 = tokenizer(text2, return_tensors="pt", truncation=True, max_length=512).to(device)
+            outputs2 = model(**inputs2)
+            scores2 = torch.sigmoid(outputs2.logits)[0].cpu().tolist()
+            prediction2 = dict(zip(LABELS, scores2))
+
+        # Log comparison request
+        log_entry = {
+            'timestamp': time.time(),
+            'ip_address': request.remote_addr,
+            'request_type': 'comparison',
+            'queries': [text1, text2],
+            'predictions': [prediction1, prediction2]
+        }
+        query_logger.info(json.dumps(log_entry))
+
+        # Record latency and increment request counter for batch endpoint
+        LATENCY.observe(time.time() - start_time)
+        REQS.inc(2) # Increment by 2 for two predictions
+
+        return jsonify({'prediction1': prediction1, 'prediction2': prediction2})
+
+    except Exception as e:
+        app.logger.error(f"Error during batch prediction: {e}")
         return jsonify({'error': 'Error processing request', 'details': str(e)}), 500
 
 @app.route('/metrics')

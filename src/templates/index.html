@@ -20,7 +20,18 @@
             border-radius: 8px;
             box-shadow: 0 0 10px rgba(0,0,0,0.1);
             width: 90%;
-            max-width: 600px;
+            max-width: 1200px; /* Increased max-width for side-by-side layout */
+        }
+        .comparison-container {
+            display: flex;
+            justify-content: space-between;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .query-box {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
         }
         h1 {
             color: #333;
@@ -44,30 +55,38 @@
             cursor: pointer;
             font-size: 1em;
             transition: background-color 0.3s ease;
+            display: block;
+            margin: 20px auto;
         }
         button:hover {
             background-color: #0056b3;
         }
-        #results {
+        #results1, #results2 {
             margin-top: 20px;
             padding: 10px;
             border: 1px solid #eee;
             background-color: #f9f9f9;
             border-radius: 4px;
         }
-        #results h2 {
+        #results1 h2, #results2 h2 {
             margin-top: 0;
             color: #555;
         }
-        .result-item {
-            margin-bottom: 5px;
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
         }
-        .result-label {
+        .results-table th, .results-table td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        .results-table th {
+            background-color: #f9f9f9;
+        }
+        .highlight {
+            color: red;
             font-weight: bold;
-        }
-        .result-score {
-            margin-left: 10px;
-            color: #007bff;
         }
         .error {
             color: red;
@@ -78,72 +97,129 @@
 <body>
     <div class="container">
         <h1>Comment Toxicity Checker</h1>
-        <textarea id="commentText" placeholder="Enter your comment here..."></textarea>
+        <div class="comparison-container">
+            <div class="query-box">
+                <textarea id="commentText1" placeholder="Enter comment 1..."></textarea>
+            </div>
+            <div class="query-box">
+                <textarea id="commentText2" placeholder="Enter comment 2..."></textarea>
+            </div>
+        </div>
+        
         <button onclick="checkToxicity()">Check Toxicity</button>
-        <div id="results">
-            <h2>Results:</h2>
-            <div id="predictions"></div>
-            <div id="error-message" class="error"></div>
+
+        <div class="comparison-container">
+            <div class="query-box">
+                <div id="results1">
+                    <div id="predictions1"></div>
+                    <div id="error-message1" class="error"></div>
+                </div>
+            </div>
+            <div class="query-box">
+                <div id="results2">
+                    <div id="predictions2"></div>
+                    <div id="error-message2" class="error"></div>
+                </div>
+            </div>
         </div>
     </div>
 
     <script>
         async function checkToxicity() {
-            const text = document.getElementById('commentText').value;
-            const predictionsDiv = document.getElementById('predictions');
-            const errorDiv = document.getElementById('error-message');
-            predictionsDiv.innerHTML = ''; // Clear previous results
-            errorDiv.innerHTML = ''; // Clear previous errors
+            const text1 = document.getElementById('commentText1').value;
+            const text2 = document.getElementById('commentText2').value;
+            const text1Trimmed = text1.trim();
+            const text2Trimmed = text2.trim();
 
-            if (!text.trim()) {
-                errorDiv.innerHTML = 'Please enter some text.';
+            // Clear previous results and errors for both boxes
+            document.getElementById('predictions1').innerHTML = '';
+            document.getElementById('error-message1').innerHTML = '';
+            document.getElementById('predictions2').innerHTML = '';
+            document.getElementById('error-message2').innerHTML = '';
+
+            if (!text1Trimmed && !text2Trimmed) {
+                document.getElementById('error-message1').innerHTML = 'Please enter text in at least one box.';
                 return;
             }
 
-            try {
-                const response = await fetch('/predict', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ text: text })
-                });
+            // If both boxes are filled, use the batch endpoint
+            if (text1Trimmed && text2Trimmed) {
+                predictBatch(text1, text2);
+            } else { // Otherwise, predict for whichever one is filled
+                if (text1Trimmed) predictSingle(text1, '1');
+                if (text2Trimmed) predictSingle(text2, '2');
+            }
+        }
 
+        async function predictBatch(text1, text2) {
+            try {
+                const response = await fetch('/predict_batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text1: text1, text2: text2 })
+                });
                 if (!response.ok) {
                     const errorData = await response.json();
                     throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
                 }
-
                 const results = await response.json();
-                
-                if (results.error) {
-                    errorDiv.innerHTML = `Error: ${results.error}`;
-                    if(results.details) errorDiv.innerHTML += `<br>Details: ${results.details}`;
-                    return;
-                }
-
-                for (const label in results) {
-                    const score = results[label];
-                    const item = document.createElement('div');
-                    item.classList.add('result-item');
-                    
-                    // Set the inner HTML first
-                    item.innerHTML = `<span class="result-label">${label}:</span> <span class="result-score">${(score * 100).toFixed(2)}%</span>`;
-
-                    // Check if score is greater than 0.5 (50%)
-                    if (score > 0.5) {
-                        item.style.color = 'red'; // This makes the label red
-                        const scoreSpan = item.querySelector('.result-score');
-                        if (scoreSpan) {
-                            scoreSpan.style.color = 'red'; // Explicitly make the score span red
-                        }
-                    }
-                    predictionsDiv.appendChild(item);
-                }
+                displayResults('1', results.prediction1);
+                displayResults('2', results.prediction2);
             } catch (error) {
                 console.error('Error:', error);
-                errorDiv.innerHTML = `Failed to get prediction: ${error.message}`;
+                // Display error in the first box for batch failures
+                document.getElementById('error-message1').innerHTML = `Failed to get prediction: ${error.message}`;
             }
+        }
+
+        async function predictSingle(text, id) {
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text })
+                });
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                }
+                const results = await response.json();
+                displayResults(id, results);
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById(`error-message${id}`).innerHTML = `Failed to get prediction: ${error.message}`;
+            }
+        }
+
+        function displayResults(id, resultData) {
+            const predictionsDiv = document.getElementById(`predictions${id}`);
+            const errorDiv = document.getElementById(`error-message${id}`);
+
+            predictionsDiv.innerHTML = '';
+            errorDiv.innerHTML = '';
+
+            if (resultData.error) {
+                errorDiv.innerHTML = `Error: ${resultData.error}`;
+                if(resultData.details) errorDiv.innerHTML += `<br>Details: ${resultData.details}`;
+                return;
+            }
+
+            const table = document.createElement('table');
+            table.classList.add('results-table');
+
+            const tbody = table.createTBody();
+            for (const label in resultData) {
+                const score = resultData[label];
+                const row = tbody.insertRow();
+                
+                row.insertCell(0).textContent = label;
+                row.insertCell(1).textContent = `${(score * 100).toFixed(2)}%`;
+
+                if (score > 0.5) {
+                    row.classList.add('highlight');
+                }
+            }
+            predictionsDiv.appendChild(table);
         }
     </script>
 </body>
